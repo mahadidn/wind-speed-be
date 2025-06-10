@@ -22,6 +22,10 @@ isfile = skalar_path.is_file()
 
 import os
 
+import psutil, os
+print("RAM usage (MB):", psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)
+
+
 try:
     print("Model path:", MODEL_DIR_UNIVARIAT / "model_60.keras")
     print("File exists:", os.path.exists(MODEL_DIR_UNIVARIAT / "model_60.keras"))
