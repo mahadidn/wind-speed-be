@@ -2,6 +2,7 @@
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
 from rest_framework import status
+from django.core.files.storage import default_storage
 from rest_framework.parsers import MultiPartParser
 # load model tensorflow
 from sklearn.preprocessing import MinMaxScaler
@@ -268,4 +269,69 @@ def prediksi_input_dari_file(request):
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+def prediksi_input_multivariat_dari_file(request):
+    try:
+        file = request.FILES.get('file')
+
+        if file is None:
+            return Response({'error': 'File tidak ditemukan'}, status=400)
+
+        # Simpan file sementara
+        file_path = default_storage.save(file.name, file)
+        full_path = default_storage.path(file_path)
+
+        # Baca file CSV atau Excel
+        if file.name.endswith('.csv'):
+            df_input = pd.read_csv(full_path)
+        elif file.name.endswith('.xlsx') or file.name.endswith('.xls'):
+            df_input = pd.read_excel(full_path)
+        else:
+            return Response({'error': 'Format file tidak didukung (gunakan .csv atau .xlsx)'}, status=400)
+
+        # Kolom yang dibutuhkan
+        required_cols = ['FF_AVG', 'TAVG', 'RH_AVG']
+        if not all(col in df_input.columns for col in required_cols):
+            return Response({'error': f'File harus mengandung kolom: {required_cols}'}, status=400)
+
+        # Ambil jumlah baris input
+        timestep = len(df_input)
+        if timestep not in MODEL_PATHS_MULTIVARIAT:
+            return Response({'error': f'Tidak ada model untuk {timestep} timestep. Gunakan salah satu dari: {list(MODEL_PATHS_MULTIVARIAT.keys())}'}, status=400)
+
+        # Ambil baris terakhir sebanyak timestep
+        input_df = df_input[required_cols].tail(timestep).copy()
+
+        # Load dataset utama untuk scaling
+        df = pd.read_csv('https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv')
+        df = df[required_cols]
+
+        # Scaling
+        X_scaler = MinMaxScaler()
+        X_scaler.fit(df[required_cols])
+
+        y_scaler = MinMaxScaler()
+        y_scaler.fit(df[['FF_AVG']])
+
+        # Normalisasi input
+        input_scaled = X_scaler.transform(input_df.values)
+        input_seq = np.expand_dims(input_scaled, axis=0)
+
+        # Ambil model
+        model = MODEL_PATHS_MULTIVARIAT[timestep]
+
+        # Prediksi
+        result = model.predict(input_seq, verbose=0)[0]
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'jumlah_input': timestep,
+            'prediction': result.tolist()
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)
 
