@@ -20,6 +20,16 @@ skalar_path = SKALAR_DIR / "X_scaler.pkl"
 isfile = skalar_path.is_file()
 
 
+import os
+
+try:
+    print("Model path:", MODEL_DIR_UNIVARIAT / "model_60.keras")
+    print("File exists:", os.path.exists(MODEL_DIR_UNIVARIAT / "model_60.keras"))
+    model = load_model(MODEL_DIR_UNIVARIAT / "model_60.keras")
+except Exception as e:
+    print("Gagal load model:", e)
+
+
 MODEL_PATHS_UNIVARIAT = {
     7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
     15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
