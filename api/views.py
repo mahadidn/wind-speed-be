@@ -6,7 +6,6 @@ from django.core.files.storage import default_storage
 from rest_framework.parsers import MultiPartParser
 # load model tensorflow
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -24,37 +23,6 @@ import os
 
 import psutil, os
 print("RAM usage (MB):", psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)
-
-
-try:
-    print("Model path:", MODEL_DIR_UNIVARIAT / "model_60.keras")
-    print("File exists:", os.path.exists(MODEL_DIR_UNIVARIAT / "model_60.keras"))
-    model = load_model(MODEL_DIR_UNIVARIAT / "model_60.keras")
-except Exception as e:
-    print("Gagal load model:", e)
-
-
-MODEL_PATHS_UNIVARIAT = {
-    # 7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
-    # 15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
-    # 30: load_model( MODEL_DIR_UNIVARIAT / "model_30.keras"),
-    # 45: load_model( MODEL_DIR_UNIVARIAT / "model_45.keras"),
-    60: load_model( MODEL_DIR_UNIVARIAT / "model_60.keras"),
-    # 75: load_model( MODEL_DIR_UNIVARIAT / "model_75.keras"),
-    # 90: load_model( MODEL_DIR_UNIVARIAT / "model_90.keras"),
-}
-
-MODEL_PATHS_MULTIVARIAT = {
-    # 7: load_model( MODEL_DIR_MULTIVARIAT / "model_7.keras"),
-    # 15: load_model( MODEL_DIR_MULTIVARIAT / "model_15.keras"),
-    # 30: load_model( MODEL_DIR_MULTIVARIAT / "model_30.keras"),
-    # 45: load_model( MODEL_DIR_MULTIVARIAT / "model_45.keras"),
-    60: load_model( MODEL_DIR_MULTIVARIAT / "model_60.keras"),
-    # 75: load_model( MODEL_DIR_MULTIVARIAT / "model_75.keras"),
-    # 90: load_model( MODEL_DIR_MULTIVARIAT / "model_90.keras"),
-}
-
-
 
 # Create your views here.
 # endpoint
@@ -111,6 +79,18 @@ def prediksi_input_univariat(request):
         input_seq = np.expand_dims(input_scaled, axis=0)
 
         print(f"📥 Input scaled shape: {input_seq.shape}")
+
+        from tensorflow.keras.models import load_model
+
+        MODEL_PATHS_UNIVARIAT = {
+            # 7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
+            # 15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
+            # 30: load_model( MODEL_DIR_UNIVARIAT / "model_30.keras"),
+            # 45: load_model( MODEL_DIR_UNIVARIAT / "model_45.keras"),
+            60: load_model( MODEL_DIR_UNIVARIAT / "model_60.keras"),
+            # 75: load_model( MODEL_DIR_UNIVARIAT / "model_75.keras"),
+            # 90: load_model( MODEL_DIR_UNIVARIAT / "model_90.keras"),
+        }
 
         # Ambil model sesuai jumlah input
         if jumlah_input not in MODEL_PATHS_UNIVARIAT:
@@ -188,6 +168,18 @@ def prediksi_input_multivariat(request):
 
         print(f"📥 Input shape after scaling: {input_seq.shape}")  # (1, jumlah_input, 3)
 
+        from tensorflow.keras.models import load_model
+
+        MODEL_PATHS_MULTIVARIAT = {
+            # 7: load_model( MODEL_DIR_MULTIVARIAT / "model_7.keras"),
+            # 15: load_model( MODEL_DIR_MULTIVARIAT / "model_15.keras"),
+            # 30: load_model( MODEL_DIR_MULTIVARIAT / "model_30.keras"),
+            # 45: load_model( MODEL_DIR_MULTIVARIAT / "model_45.keras"),
+            60: load_model( MODEL_DIR_MULTIVARIAT / "model_60.keras"),
+            # 75: load_model( MODEL_DIR_MULTIVARIAT / "model_75.keras"),
+            # 90: load_model( MODEL_DIR_MULTIVARIAT / "model_90.keras"),
+        }
+
         # Ambil model sesuai jumlah timestep
         if jumlah_input not in MODEL_PATHS_MULTIVARIAT:
             return Response({
@@ -234,6 +226,18 @@ def prediksi_input_dari_file(request):
 
         input_values = df_input['FF_AVG'].dropna().tolist()
         jumlah_input = len(input_values)
+
+        from tensorflow.keras.models import load_model
+
+        MODEL_PATHS_UNIVARIAT = {
+            # 7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
+            # 15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
+            # 30: load_model( MODEL_DIR_UNIVARIAT / "model_30.keras"),
+            # 45: load_model( MODEL_DIR_UNIVARIAT / "model_45.keras"),
+            60: load_model( MODEL_DIR_UNIVARIAT / "model_60.keras"),
+            # 75: load_model( MODEL_DIR_UNIVARIAT / "model_75.keras"),
+            # 90: load_model( MODEL_DIR_UNIVARIAT / "model_90.keras"),
+        }
 
         if jumlah_input not in MODEL_PATHS_UNIVARIAT:
             return Response({
@@ -308,6 +312,18 @@ def prediksi_input_multivariat_dari_file(request):
         required_cols = ['FF_AVG', 'TAVG', 'RH_AVG']
         if not all(col in df_input.columns for col in required_cols):
             return Response({'error': f'File harus mengandung kolom: {required_cols}'}, status=400)
+
+        from tensorflow.keras.models import load_model
+
+        MODEL_PATHS_MULTIVARIAT = {
+            # 7: load_model( MODEL_DIR_MULTIVARIAT / "model_7.keras"),
+            # 15: load_model( MODEL_DIR_MULTIVARIAT / "model_15.keras"),
+            # 30: load_model( MODEL_DIR_MULTIVARIAT / "model_30.keras"),
+            # 45: load_model( MODEL_DIR_MULTIVARIAT / "model_45.keras"),
+            60: load_model( MODEL_DIR_MULTIVARIAT / "model_60.keras"),
+            # 75: load_model( MODEL_DIR_MULTIVARIAT / "model_75.keras"),
+            # 90: load_model( MODEL_DIR_MULTIVARIAT / "model_90.keras"),
+        }
 
         # Ambil jumlah baris input
         timestep = len(df_input)
