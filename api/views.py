@@ -14,20 +14,31 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
-MODEL_DIR = BASE_DIR / "models" / "univariat"
+MODEL_DIR_UNIVARIAT = BASE_DIR / "models" / "univariat"
+MODEL_DIR_MULTIVARIAT = BASE_DIR / "models" / "multivariat"
 SKALAR_DIR = BASE_DIR / "models" / "skalar"
 skalar_path = SKALAR_DIR / "X_scaler.pkl"
 isfile = skalar_path.is_file()
 
 
 MODEL_PATHS_UNIVARIAT = {
-    7: load_model( MODEL_DIR / "model_7.keras"),
-    15: load_model( MODEL_DIR / "model_15.keras"),
-    30: load_model( MODEL_DIR / "model_30.keras"),
-    45: load_model( MODEL_DIR / "model_45.keras"),
-    60: load_model( MODEL_DIR / "model_60.keras"),
-    75: load_model( MODEL_DIR / "model_75.keras"),
-    90: load_model( MODEL_DIR / "model_90.keras"),
+    7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
+    15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
+    30: load_model( MODEL_DIR_UNIVARIAT / "model_30.keras"),
+    45: load_model( MODEL_DIR_UNIVARIAT / "model_45.keras"),
+    60: load_model( MODEL_DIR_UNIVARIAT / "model_60.keras"),
+    75: load_model( MODEL_DIR_UNIVARIAT / "model_75.keras"),
+    90: load_model( MODEL_DIR_UNIVARIAT / "model_90.keras"),
+}
+
+MODEL_PATHS_MULTIVARIAT = {
+    7: load_model( MODEL_DIR_MULTIVARIAT / "model_7.keras"),
+    15: load_model( MODEL_DIR_MULTIVARIAT / "model_15.keras"),
+    30: load_model( MODEL_DIR_MULTIVARIAT / "model_30.keras"),
+    45: load_model( MODEL_DIR_MULTIVARIAT / "model_45.keras"),
+    60: load_model( MODEL_DIR_MULTIVARIAT / "model_60.keras"),
+    75: load_model( MODEL_DIR_MULTIVARIAT / "model_75.keras"),
+    90: load_model( MODEL_DIR_MULTIVARIAT / "model_90.keras"),
 }
 
 
@@ -111,6 +122,84 @@ def prediksi_input_univariat(request):
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
+def prediksi_input_multivariat(request):
+    try:
+        data = request.POST
+
+        # Ambil semua input yang valid dan urutkan berdasarkan indeksnya
+        angin_keys = sorted([k for k in data.keys() if k.startswith('anginke')], key=lambda x: int(x.replace('anginke', '')))
+        suhu_keys = sorted([k for k in data.keys() if k.startswith('temperaturke')], key=lambda x: int(x.replace('temperaturke', '')))
+        lembap_keys = sorted([k for k in data.keys() if k.startswith('kelembapanke')], key=lambda x: int(x.replace('kelembapanke', '')))
+
+        if not (len(angin_keys) == len(suhu_keys) == len(lembap_keys)):
+            return Response({'error': 'Jumlah timestep antar fitur tidak konsisten'}, status=status.HTTP_400_BAD_REQUEST)
+
+        jumlah_input = len(angin_keys)
+
+        # Susun input menjadi array shape (jumlah_input, 3)
+        input_values = []
+        for i in range(jumlah_input):
+            angin = float(data[angin_keys[i]])
+            suhu = float(data[suhu_keys[i]])
+            lembap = float(data[lembap_keys[i]])
+            input_values.append([angin, suhu, lembap])
+
+        input_array = np.array(input_values)  # shape: (jumlah_input, 3)
+
+        # Ambil dataset utama multivariat
+        df = pd.read_csv('https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv')
+        df = df[['TANGGAL', 'FF_AVG', 'TAVG', 'RH_AVG']]
+
+        feature_cols = ['FF_AVG', 'TAVG', 'RH_AVG']
+        target_col = 'FF_AVG'
+
+        # Split data
+        n = len(df)
+        n_train = int(n)
+        train_df = df.iloc[:n_train].copy()
+
+        X_train = train_df[feature_cols].values
+        y_train = train_df[target_col].values
+
+        # Scaling
+        X_scaler = MinMaxScaler()
+        X_train_scaled = X_scaler.fit_transform(X_train)
+        print(X_train_scaled.shape)
+
+        y_scaler = MinMaxScaler()
+        y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+
+        # Normalisasi input dan reshape ke (1, timestep, fitur)
+        input_scaled = X_scaler.transform(input_array)
+        input_seq = np.expand_dims(input_scaled, axis=0)
+
+        print(f"📥 Input shape after scaling: {input_seq.shape}")  # (1, jumlah_input, 3)
+
+        # Ambil model sesuai jumlah timestep
+        if jumlah_input not in MODEL_PATHS_MULTIVARIAT:
+            return Response({
+                'error': f"Tidak ada model untuk {jumlah_input} timestep. Gunakan 7, 15, 30, 45, 60, 75, atau 90 timestep."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        model = MODEL_PATHS_MULTIVARIAT[jumlah_input]
+
+        # Prediksi
+        result = model.predict(input_seq, verbose=0)[0]
+
+        # Denormalisasi hasil prediksi
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'jumlah_input': jumlah_input,
+            'prediction': result.tolist()
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    
+
+@api_view(['POST'])
 @parser_classes([MultiPartParser])
 def prediksi_input_dari_file(request):
     try:
@@ -177,4 +266,6 @@ def prediksi_input_dari_file(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
