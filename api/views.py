@@ -9,8 +9,6 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import load_model
 import pandas as pd
 import numpy as np
-import os
-import joblib
 from pathlib import Path
 
 
