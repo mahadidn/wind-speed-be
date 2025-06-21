@@ -5,32 +5,140 @@ from rest_framework import status
 from django.core.files.storage import default_storage
 from rest_framework.parsers import MultiPartParser
 # load model tensorflow
-from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 import numpy as np
-from pathlib import Path
+from api.utils.getScalerUni import getScalerUni
+from api.utils.getScalerMulti import getScalerMulti
+from api.utils.loadModelsUni import loadModelsUni
+from api.utils.loadModelsMulti import loadModelsMulti    
 
-
-BASE_DIR = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
-MODEL_DIR_UNIVARIAT = BASE_DIR / "models" / "univariat"
-MODEL_DIR_MULTIVARIAT = BASE_DIR / "models" / "multivariat"
-SKALAR_DIR = BASE_DIR / "models" / "skalar"
-skalar_path = SKALAR_DIR / "X_scaler.pkl"
-isfile = skalar_path.is_file()
-
-
-import os
-
-import psutil, os
-print("RAM usage (MB):", psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)
 
 # Create your views here.
 # endpoint
 @api_view(['GET'])
 def get_user(request):
     # return Response({"message": "Hello, World!"})
-    return Response({'message': isfile})
+    return Response({'message': "success"})
 
+# input manual
+# univariat
+@api_view(['POST'])
+def prediksi_input_univariat(request):
+    try:
+        data = request.POST
+
+        # Ambil semua key seperti harike1, harike2, ...
+        sorted_keys = sorted(
+            [k for k in data.keys() if k.startswith('harike')],
+            key=lambda x: int(x.replace('harike', ''))
+        )
+        input_values = [float(data[k]) for k in sorted_keys]
+        jumlah_input = len(input_values)
+
+        # load scaler
+        X_scaler, y_scaler = getScalerUni()
+
+        # Load dataset
+        MODEL_PATHS_UNIVARIAT = loadModelsUni()
+        if jumlah_input not in MODEL_PATHS_UNIVARIAT:
+            return Response({
+                'error': f"Tidak ada model untuk {jumlah_input} input. Gunakan 7, 15, 30, 45, 60, 75, atau 90 input."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Siapkan input
+        input_array = np.array(input_values).reshape(-1, 1)
+        input_scaled = X_scaler.transform(input_array)
+        input_seq = np.expand_dims(input_scaled, axis=0)
+
+        print(f"📥 Input scaled shape: {input_seq.shape}")
+
+        # Ambil model sesuai jumlah input
+        if jumlah_input not in MODEL_PATHS_UNIVARIAT:
+            return Response({
+                'error': f"Tidak ada model untuk {jumlah_input} input. Gunakan 7, 15, 30, 45, 60, 75, atau 90 input."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        model = MODEL_PATHS_UNIVARIAT[jumlah_input]
+
+        # Prediksi
+        result = model.predict(input_seq, verbose=0)[0]
+
+        # Denormalisasi hasil prediksi
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'jumlah_input': jumlah_input,
+            'prediction': result.tolist()
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# multivariat
+@api_view(['POST'])
+def prediksi_input_multivariat(request):
+    try:
+        data = request.POST
+
+        # Ambil semua input yang valid dan urutkan berdasarkan indeksnya
+        angin_keys = sorted([k for k in data.keys() if k.startswith('anginke')], key=lambda x: int(x.replace('anginke', '')))
+        suhu_keys = sorted([k for k in data.keys() if k.startswith('temperaturke')], key=lambda x: int(x.replace('temperaturke', '')))
+        lembap_keys = sorted([k for k in data.keys() if k.startswith('kelembapanke')], key=lambda x: int(x.replace('kelembapanke', '')))
+
+        if not (len(angin_keys) == len(suhu_keys) == len(lembap_keys)):
+            return Response({'error': 'Jumlah timestep antar fitur tidak konsisten'}, status=status.HTTP_400_BAD_REQUEST)
+
+        jumlah_input = len(angin_keys)
+
+        # Susun input menjadi array shape (jumlah_input, 3)
+        input_values = []
+        for i in range(jumlah_input):
+            angin = float(data[angin_keys[i]])
+            suhu = float(data[suhu_keys[i]])
+            lembap = float(data[lembap_keys[i]])
+            input_values.append([angin, suhu, lembap])
+
+        input_array = np.array(input_values)  # shape: (jumlah_input, 3)
+
+        # load scaler multivariat
+        X_scaler, y_scaler = getScalerMulti()
+        # Load model multivariat
+        MODEL_PATHS_MULTIVARIAT = loadModelsMulti()
+        if jumlah_input not in MODEL_PATHS_MULTIVARIAT:
+            return Response({
+                'error': f"Tidak ada model untuk {jumlah_input} timestep. Gunakan 7, 15, 30, 45, 60, 75, atau 90 timestep."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Normalisasi input dan reshape ke (1, timestep, fitur)
+        input_scaled = X_scaler.transform(input_array)
+        input_seq = np.expand_dims(input_scaled, axis=0)
+
+        print(f"📥 Input shape after scaling: {input_seq.shape}")  # (1, jumlah_input, 3)
+
+        # Ambil model sesuai jumlah timestep
+        if jumlah_input not in MODEL_PATHS_MULTIVARIAT:
+            return Response({
+                'error': f"Tidak ada model untuk {jumlah_input} timestep. Gunakan 7, 15, 30, 45, 60, 75, atau 90 timestep."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        model = MODEL_PATHS_MULTIVARIAT[jumlah_input]
+
+        # Prediksi
+        result = model.predict(input_seq, verbose=0)[0]
+
+        # Denormalisasi hasil prediksi
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'jumlah_input': jumlah_input,
+            'prediction': result.tolist()
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+# input file
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
 def prediksi_input_dari_file(request):
@@ -54,40 +162,15 @@ def prediksi_input_dari_file(request):
         input_values = df_input['FF_AVG'].dropna().tolist()
         jumlah_input = len(input_values)
 
-        from tensorflow.keras.models import load_model
-
-        MODEL_PATHS_UNIVARIAT = {
-            7: load_model( MODEL_DIR_UNIVARIAT / "model_7.keras"),
-            15: load_model( MODEL_DIR_UNIVARIAT / "model_15.keras"),
-            30: load_model( MODEL_DIR_UNIVARIAT / "model_30.keras"),
-            45: load_model( MODEL_DIR_UNIVARIAT / "model_45.keras"),
-            60: load_model( MODEL_DIR_UNIVARIAT / "model_60.keras"),
-            75: load_model( MODEL_DIR_UNIVARIAT / "model_75.keras"),
-            90: load_model( MODEL_DIR_UNIVARIAT / "model_90.keras"),
-        }
+        MODEL_PATHS_UNIVARIAT = loadModelsUni()
 
         if jumlah_input not in MODEL_PATHS_UNIVARIAT:
             return Response({
                 'error': f"Jumlah input tidak valid: {jumlah_input}. Gunakan 7, 15, 30, 45, 60, 75, atau 90 data."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Baca dataset utama
-        df = pd.read_csv('https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994-2025-univariat.csv')
-        df = df[['TANGGAL', 'FF_AVG']]
-
-        # Split data
-        n = len(df)
-        n_train = int(n * 0.70)
-        train_df = df.iloc[:n_train].copy()
-
-        # Scaling
-        X_scaler = MinMaxScaler()
-        X_train = train_df[['FF_AVG']].values
-        X_scaler.fit(X_train)
-
-        y_scaler = MinMaxScaler()
-        y_train = train_df['FF_AVG'].values.reshape(-1, 1)
-        y_scaler.fit(y_train)
+        # getscaler
+        X_scaler, y_scaler = getScalerUni()
 
         # Normalisasi input
         input_array = np.array(input_values).reshape(-1, 1)
@@ -110,8 +193,6 @@ def prediksi_input_dari_file(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
 
 
 @api_view(['POST'])
@@ -140,17 +221,7 @@ def prediksi_input_multivariat_dari_file(request):
         if not all(col in df_input.columns for col in required_cols):
             return Response({'error': f'File harus mengandung kolom: {required_cols}'}, status=400)
 
-        from tensorflow.keras.models import load_model
-
-        MODEL_PATHS_MULTIVARIAT = {
-            7: load_model( MODEL_DIR_MULTIVARIAT / "model_7.keras"),
-            15: load_model( MODEL_DIR_MULTIVARIAT / "model_15.keras"),
-            30: load_model( MODEL_DIR_MULTIVARIAT / "model_30.keras"),
-            45: load_model( MODEL_DIR_MULTIVARIAT / "model_45.keras"),
-            60: load_model( MODEL_DIR_MULTIVARIAT / "model_60.keras"),
-            75: load_model( MODEL_DIR_MULTIVARIAT / "model_75.keras"),
-            90: load_model( MODEL_DIR_MULTIVARIAT / "model_90.keras"),
-        }
+        MODEL_PATHS_MULTIVARIAT = loadModelsMulti()
 
         # Ambil jumlah baris input
         timestep = len(df_input)
@@ -160,16 +231,7 @@ def prediksi_input_multivariat_dari_file(request):
         # Ambil baris terakhir sebanyak timestep
         input_df = df_input[required_cols].tail(timestep).copy()
 
-        # Load dataset utama untuk scaling
-        df = pd.read_csv('https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv')
-        df = df[required_cols]
-
-        # Scaling
-        X_scaler = MinMaxScaler()
-        X_scaler.fit(df[required_cols])
-
-        y_scaler = MinMaxScaler()
-        y_scaler.fit(df[['FF_AVG']])
+        X_scaler, y_scaler = getScalerMulti()
 
         # Normalisasi input
         input_scaled = X_scaler.transform(input_df.values)
