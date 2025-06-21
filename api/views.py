@@ -10,7 +10,8 @@ import numpy as np
 from api.utils.getScalerUni import getScalerUni
 from api.utils.getScalerMulti import getScalerMulti
 from api.utils.loadModelsUni import loadModelsUni
-from api.utils.loadModelsMulti import loadModelsMulti    
+from api.utils.loadModelsMulti import loadModelsMulti 
+from datetime import datetime, timedelta   
 
 
 # Create your views here.
@@ -137,6 +138,143 @@ def prediksi_input_multivariat(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def prediksi_dari_tanggal_univariat(request):
+    try:
+        timestep_raw = request.data.get('timestep')
+        tanggal_str = request.data.get('tanggalPrediksi')
+
+        if not timestep_raw or not tanggal_str:
+            return Response({'error': 'Parameter "timestep" dan "tanggalPrediksi" wajib diisi.'}, status=400)
+
+        try:
+            timestep = int(timestep_raw)
+        except ValueError:
+            return Response({'error': '"timestep" harus berupa angka'}, status=400)
+
+        try:
+            target_date = datetime.strptime(tanggal_str, "%d-%m-%Y")
+        except ValueError:
+            return Response({'error': 'Format "tanggalPrediksi" harus "dd-mm-yyyy".'}, status=400)
+
+        # Load model
+        MODEL_PATHS_UNIVARIAT = loadModelsUni()
+        if timestep not in MODEL_PATHS_UNIVARIAT:
+            return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
+
+        # Load data & pastikan format datetime sesuai
+        df = pd.read_csv(
+            'https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994-2025-univariat.csv'
+        )
+        df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
+        df = df[['TANGGAL', 'FF_AVG']]
+        df.set_index('TANGGAL', inplace=True)
+
+        # Ambil data untuk input
+        input_start = target_date - timedelta(days=timestep)
+        input_end = target_date - timedelta(days=1)
+
+        input_df = df.loc[input_start:input_end][['FF_AVG']]
+        if len(input_df) != timestep:
+            return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
+
+        # Ambil data aktual 30 hari ke depan
+        pred_start = target_date
+        pred_end = target_date + timedelta(days=29)
+        actual_df = df.loc[pred_start:pred_end]['FF_AVG']
+        # tanggal_aktual = [str(t.date()) for t in actual_df.index]
+
+        # Scaling
+        X_scaler, y_scaler = getScalerUni()
+        input_scaled = X_scaler.transform(input_df.values)
+
+        # Prediksi
+        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 3)
+        model = MODEL_PATHS_UNIVARIAT[timestep]
+        result = model.predict(input_seq, verbose=0)[0]
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'timestep': timestep,
+            'tanggal_prediksi': tanggal_str,
+            'prediction': result.tolist(),
+            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'tipe': 'univariat',
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def prediksi_dari_tanggal_multivariat(request):
+    try:
+        timestep_raw = request.data.get('timestep')
+        tanggal_str = request.data.get('tanggalPrediksi')
+
+        if not timestep_raw or not tanggal_str:
+            return Response({'error': 'Parameter "timestep" dan "tanggalPrediksi" wajib diisi.'}, status=400)
+
+        try:
+            timestep = int(timestep_raw)
+        except ValueError:
+            return Response({'error': '"timestep" harus berupa angka'}, status=400)
+
+        try:
+            target_date = datetime.strptime(tanggal_str, "%d-%m-%Y")
+        except ValueError:
+            return Response({'error': 'Format "tanggalPrediksi" harus "dd-mm-yyyy".'}, status=400)
+
+        # Load model
+        MODEL_PATHS_MULTIVARIAT = loadModelsMulti()
+        if timestep not in MODEL_PATHS_MULTIVARIAT:
+            return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
+
+        # Load data & pastikan format datetime sesuai
+        df = pd.read_csv(
+            'https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv'
+        )
+        df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
+        df = df[['TANGGAL', 'FF_AVG', 'TAVG', 'RH_AVG']]
+        df.set_index('TANGGAL', inplace=True)
+
+        # Ambil data untuk input
+        input_start = target_date - timedelta(days=timestep)
+        input_end = target_date - timedelta(days=1)
+
+        input_df = df.loc[input_start:input_end][['FF_AVG', 'TAVG', 'RH_AVG']]
+        if len(input_df) != timestep:
+            return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
+
+        # Ambil data aktual 30 hari ke depan
+        pred_start = target_date
+        pred_end = target_date + timedelta(days=29)
+        actual_df = df.loc[pred_start:pred_end]['FF_AVG']
+        # tanggal_aktual = [str(t.date()) for t in actual_df.index]
+
+        # Scaling
+        X_scaler, y_scaler = getScalerMulti()
+        input_scaled = X_scaler.transform(input_df.values)
+
+        # Prediksi
+        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 3)
+        model = MODEL_PATHS_MULTIVARIAT[timestep]
+        result = model.predict(input_seq, verbose=0)[0]
+        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        return Response({
+            'timestep': timestep,
+            'tanggal_prediksi': tanggal_str,
+            'prediction': result.tolist(),
+            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'tipe': 'multivariat',
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
 
 # input file
 @api_view(['POST'])
