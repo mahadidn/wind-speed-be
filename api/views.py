@@ -184,7 +184,7 @@ def prediksi_dari_tanggal_univariat(request):
         pred_start = target_date
         pred_end = target_date + timedelta(days=29)
         actual_df = df.loc[pred_start:pred_end]['FF_AVG']
-        # tanggal_aktual = [str(t.date()) for t in actual_df.index]
+        tanggal_aktual = [str(t.date()) for t in actual_df.index]
 
         # Scaling
         X_scaler, y_scaler = getScalerUni()
@@ -202,6 +202,7 @@ def prediksi_dari_tanggal_univariat(request):
             'prediction': result.tolist(),
             'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
             'tipe': 'univariat',
+            'tanggal_aktual': tanggal_aktual
         })
 
     except Exception as e:
@@ -252,7 +253,7 @@ def prediksi_dari_tanggal_multivariat(request):
         pred_start = target_date
         pred_end = target_date + timedelta(days=29)
         actual_df = df.loc[pred_start:pred_end]['FF_AVG']
-        # tanggal_aktual = [str(t.date()) for t in actual_df.index]
+        tanggal_aktual = [str(t.date()) for t in actual_df.index]
 
         # Scaling
         X_scaler, y_scaler = getScalerMulti()
@@ -270,6 +271,7 @@ def prediksi_dari_tanggal_multivariat(request):
             'prediction': result.tolist(),
             'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
             'tipe': 'multivariat',
+            'tanggal_aktual': tanggal_aktual
         })
 
     except Exception as e:
