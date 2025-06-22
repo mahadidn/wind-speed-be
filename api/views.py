@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.core.files.storage import default_storage
 from rest_framework.parsers import MultiPartParser
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 # load model tensorflow
 import pandas as pd
 import numpy as np
@@ -175,8 +176,8 @@ def prediksi_dari_tanggal_univariat(request):
         # Ambil data untuk input
         input_start = target_date - timedelta(days=timestep)
         input_end = target_date - timedelta(days=1)
-
         input_df = df.loc[input_start:input_end][['FF_AVG']]
+
         if len(input_df) != timestep:
             return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
 
@@ -191,23 +192,37 @@ def prediksi_dari_tanggal_univariat(request):
         input_scaled = X_scaler.transform(input_df.values)
 
         # Prediksi
-        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 3)
+        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 1)
         model = MODEL_PATHS_UNIVARIAT[timestep]
         result = model.predict(input_seq, verbose=0)[0]
-        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+        prediction_normalized = result.reshape(-1, 1).flatten()
+        prediction = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+
+        # Evaluasi jika data aktual tersedia lengkap
+        if len(actual_df) == 30:
+            actual_values = actual_df.values
+            actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten() 
+
+            mae = float(mean_absolute_error(actual_values, prediction_normalized))
+            rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
+            mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+        else:
+            mae = rmse = mape = 'Data aktual tidak lengkap'
 
         return Response({
             'timestep': timestep,
             'tanggal_prediksi': tanggal_str,
-            'prediction': result.tolist(),
-            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
             'tipe': 'univariat',
-            'tanggal_aktual': tanggal_aktual
+            'prediction': prediction.tolist(),
+            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'tanggal_aktual': tanggal_aktual,
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape
         })
 
     except Exception as e:
         return Response({'error': str(e)}, status=500)
-
 
 @api_view(['POST'])
 def prediksi_dari_tanggal_multivariat(request):
@@ -233,7 +248,7 @@ def prediksi_dari_tanggal_multivariat(request):
         if timestep not in MODEL_PATHS_MULTIVARIAT:
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
 
-        # Load data & pastikan format datetime sesuai
+        # Load dataset
         df = pd.read_csv(
             'https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv'
         )
@@ -244,8 +259,8 @@ def prediksi_dari_tanggal_multivariat(request):
         # Ambil data untuk input
         input_start = target_date - timedelta(days=timestep)
         input_end = target_date - timedelta(days=1)
-
         input_df = df.loc[input_start:input_end][['FF_AVG', 'TAVG', 'RH_AVG']]
+
         if len(input_df) != timestep:
             return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
 
@@ -262,16 +277,31 @@ def prediksi_dari_tanggal_multivariat(request):
         # Prediksi
         input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 3)
         model = MODEL_PATHS_MULTIVARIAT[timestep]
-        result = model.predict(input_seq, verbose=0)[0]
-        result = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+        prediction = model.predict(input_seq, verbose=0)[0]
+        prediction_normalized = prediction.reshape(-1, 1).flatten()
+        prediction = y_scaler.inverse_transform(prediction.reshape(-1, 1)).flatten()
+
+        # Evaluasi jika data aktual tersedia
+        if len(actual_df) == 30:
+            actual_values = actual_df.values
+            actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
+
+            mae = float(mean_absolute_error(actual_values, prediction_normalized))
+            rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
+            mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+        else:
+            mae = rmse = mape = 'Data aktual tidak lengkap'
 
         return Response({
             'timestep': timestep,
             'tanggal_prediksi': tanggal_str,
-            'prediction': result.tolist(),
-            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
             'tipe': 'multivariat',
-            'tanggal_aktual': tanggal_aktual
+            'prediction': prediction.tolist(),
+            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'tanggal_aktual': tanggal_aktual,
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape
         })
 
     except Exception as e:
