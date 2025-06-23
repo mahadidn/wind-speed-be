@@ -205,7 +205,19 @@ def prediksi_dari_tanggal_univariat(request):
 
             mae = float(mean_absolute_error(actual_values, prediction_normalized))
             rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
-            mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+            # try:
+            #     mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+            # except ZeroDivisionError:
+            #     mape = 0  # atau bisa juga: mape = 'MAPE tidak dapat dihitung karena ada nilai aktual = 0'
+            mask = actual_values != 0
+            if np.any(actual_values == 0):
+                mape = 0
+            else:
+                if np.any(mask):
+                    mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
+                else:
+                    mape = None  # atau: 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
+
         else:
             mae = rmse = mape = 'Data aktual tidak lengkap'
 
@@ -288,7 +300,21 @@ def prediksi_dari_tanggal_multivariat(request):
 
             mae = float(mean_absolute_error(actual_values, prediction_normalized))
             rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
-            mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+            # try:
+            #     mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
+            # except ZeroDivisionError:
+            #     mape = None  # atau bisa juga: mape = 'MAPE tidak dapat dihitung karena ada nilai aktual = 0'
+            # Masking nilai nol agar tidak dihitung dalam MAPE
+            mask = actual_values != 0
+            if np.any(actual_values == 0):
+                mape = 0
+            else:
+                if np.any(mask):
+                    mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
+                else:
+                    mape = None  # atau: 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
+
+
         else:
             mae = rmse = mape = 'Data aktual tidak lengkap'
 
