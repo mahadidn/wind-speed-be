@@ -13,6 +13,7 @@ from api.utils.getScalerMulti import getScalerMulti
 from api.utils.loadModelsUni import loadModelsUni
 from api.utils.loadModelsMulti import loadModelsMulti 
 from datetime import datetime, timedelta   
+from pathlib import Path
 
 
 # Create your views here.
@@ -166,9 +167,13 @@ def prediksi_dari_tanggal_univariat(request):
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
 
         # Load data & pastikan format datetime sesuai
-        df = pd.read_csv(
-            'https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994-2025-univariat.csv'
-        )
+        base_dir = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
+        data_univariat = base_dir / "models" / "datasets" / "1994-2025-univariat.csv"
+        if not data_univariat.exists():
+            return Response({'error': 'Dataset tidak ditemukan.'}, status=404)
+        # Baca dataset
+        df = pd.read_csv(data_univariat)
+
         df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
         df = df[['TANGGAL', 'FF_AVG']]
         df.set_index('TANGGAL', inplace=True)
@@ -261,9 +266,13 @@ def prediksi_dari_tanggal_multivariat(request):
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
 
         # Load dataset
-        df = pd.read_csv(
-            'https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994_2025_multivariat.csv'
-        )
+        base_dir = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
+        data_multivariat = base_dir / "models" / "datasets" / "1994_2025_multivariat.csv"
+        if not data_multivariat.exists():
+            return Response({'error': f'Dataset tidak ditemukan, {data_multivariat}'}, status=404)
+        # Baca dataset
+        df = pd.read_csv(data_multivariat)
+
         df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
         df = df[['TANGGAL', 'FF_AVG', 'TAVG', 'RH_AVG']]
         df.set_index('TANGGAL', inplace=True)

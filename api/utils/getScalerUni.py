@@ -1,9 +1,18 @@
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
+from pathlib import Path
 
 def getScalerUni():
+
+    path = Path(__file__).resolve().parent  # -> prediksi/api
+    # Buang 'utils' dari path jika ada
+    parts = [part for part in path.parts if part != "utils"]
+    base_dir = Path(*parts)
+    # Gunakan operator / secara aman karena BASE_DIR adalah Path object
+    load_data_uni = base_dir / "models" / "datasets" / "1994-2025-univariat.csv"
+
     # Baca dataset utama
-    df = pd.read_csv('https://raw.githubusercontent.com/mahadidn/wind-speed-forecasting/refs/heads/main/datasets/1994-2025-univariat.csv')
+    df = pd.read_csv(load_data_uni)
     df = df[['TANGGAL', 'FF_AVG']]
 
     # Split data
