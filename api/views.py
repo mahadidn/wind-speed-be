@@ -166,14 +166,13 @@ def prediksi_dari_tanggal_univariat(request):
         if timestep not in MODEL_PATHS_UNIVARIAT:
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
 
-        # Load data & pastikan format datetime sesuai
-        base_dir = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
+        # Load data dari file lokal
+        base_dir = Path(__file__).resolve().parent  # prediksi/api
         data_univariat = base_dir / "models" / "datasets" / "1994-2025-univariat.csv"
         if not data_univariat.exists():
             return Response({'error': 'Dataset tidak ditemukan.'}, status=404)
-        # Baca dataset
-        df = pd.read_csv(data_univariat)
 
+        df = pd.read_csv(data_univariat)
         df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
         df = df[['TANGGAL', 'FF_AVG']]
         df.set_index('TANGGAL', inplace=True)
@@ -186,11 +185,13 @@ def prediksi_dari_tanggal_univariat(request):
         if len(input_df) != timestep:
             return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
 
-        # Ambil data aktual 30 hari ke depan
+        # Ambil data aktual (30 hari setelah tanggal prediksi)
         pred_start = target_date
         pred_end = target_date + timedelta(days=29)
         actual_df = df.loc[pred_start:pred_end]['FF_AVG']
-        tanggal_aktual = [str(t.date()) for t in actual_df.index]
+
+        # Tetap buat 30 tanggal prediksi ke depan meskipun data tidak lengkap
+        tanggal_aktual = [(pred_start + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(30)]
 
         # Scaling
         X_scaler, y_scaler = getScalerUni()
@@ -203,26 +204,20 @@ def prediksi_dari_tanggal_univariat(request):
         prediction_normalized = result.reshape(-1, 1).flatten()
         prediction = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
 
-        # Evaluasi jika data aktual tersedia lengkap
+        # Evaluasi
         if len(actual_df) == 30:
             actual_values = actual_df.values
-            actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten() 
+            actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
 
             mae = float(mean_absolute_error(actual_values, prediction_normalized))
             rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
-            # try:
-            #     mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
-            # except ZeroDivisionError:
-            #     mape = 0  # atau bisa juga: mape = 'MAPE tidak dapat dihitung karena ada nilai aktual = 0'
-            mask = actual_values != 0
-            if np.any(actual_values == 0):
-                mape = 0
-            else:
-                if np.any(mask):
-                    mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
-                else:
-                    mape = None  # atau: 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
 
+            # Tangani kemungkinan nilai nol pada actual
+            mask = actual_values != 0
+            if np.any(mask):
+                mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
+            else:
+                mape = None  # atau: mape = 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
         else:
             mae = rmse = mape = 'Data aktual tidak lengkap'
 
@@ -265,14 +260,13 @@ def prediksi_dari_tanggal_multivariat(request):
         if timestep not in MODEL_PATHS_MULTIVARIAT:
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
 
-        # Load dataset
-        base_dir = Path(__file__).resolve().parent  # ini akan mengarah ke: prediksi/api
+        # Load dataset dari file lokal
+        base_dir = Path(__file__).resolve().parent
         data_multivariat = base_dir / "models" / "datasets" / "1994_2025_multivariat.csv"
         if not data_multivariat.exists():
             return Response({'error': f'Dataset tidak ditemukan, {data_multivariat}'}, status=404)
-        # Baca dataset
-        df = pd.read_csv(data_multivariat)
 
+        df = pd.read_csv(data_multivariat)
         df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
         df = df[['TANGGAL', 'FF_AVG', 'TAVG', 'RH_AVG']]
         df.set_index('TANGGAL', inplace=True)
@@ -289,7 +283,9 @@ def prediksi_dari_tanggal_multivariat(request):
         pred_start = target_date
         pred_end = target_date + timedelta(days=29)
         actual_df = df.loc[pred_start:pred_end]['FF_AVG']
-        tanggal_aktual = [str(t.date()) for t in actual_df.index]
+
+        # Tetap buat 30 tanggal ke depan (meskipun data aktual bisa tidak lengkap)
+        tanggal_aktual = [(pred_start + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(30)]
 
         # Scaling
         X_scaler, y_scaler = getScalerMulti()
@@ -302,28 +298,20 @@ def prediksi_dari_tanggal_multivariat(request):
         prediction_normalized = prediction.reshape(-1, 1).flatten()
         prediction = y_scaler.inverse_transform(prediction.reshape(-1, 1)).flatten()
 
-        # Evaluasi jika data aktual tersedia
+        # Evaluasi
         if len(actual_df) == 30:
             actual_values = actual_df.values
             actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
 
             mae = float(mean_absolute_error(actual_values, prediction_normalized))
             rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
-            # try:
-            #     mape = float(np.mean(np.abs((actual_values - prediction_normalized) / actual_values)) * 100)
-            # except ZeroDivisionError:
-            #     mape = None  # atau bisa juga: mape = 'MAPE tidak dapat dihitung karena ada nilai aktual = 0'
-            # Masking nilai nol agar tidak dihitung dalam MAPE
+
+            # Tangani pembagian dengan nol untuk MAPE
             mask = actual_values != 0
-            if np.any(actual_values == 0):
-                mape = 0
+            if np.any(mask):
+                mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
             else:
-                if np.any(mask):
-                    mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
-                else:
-                    mape = None  # atau: 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
-
-
+                mape = None
         else:
             mae = rmse = mape = 'Data aktual tidak lengkap'
 
@@ -341,7 +329,6 @@ def prediksi_dari_tanggal_multivariat(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=500)
-
 
 # input file
 @api_view(['POST'])
