@@ -141,7 +141,7 @@ def prediksi_input_multivariat(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-
+# input tanggal untuk data testing
 @api_view(['POST'])
 def prediksi_dari_tanggal_univariat(request):
     try:
@@ -329,6 +329,114 @@ def prediksi_dari_tanggal_multivariat(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+
+# input tanggal untuk data baru
+@api_view(['POST'])
+def prediksi_dari_tanggal_univariat_baru(request):
+    try:
+        timestep_raw = request.data.get('timestep')
+        tanggal_str = request.data.get('tanggalPrediksi')
+
+        if not timestep_raw or not tanggal_str:
+            return Response({'error': 'Parameter "timestep" dan "tanggalPrediksi" wajib diisi.'}, status=400)
+
+        try:
+            timestep = int(timestep_raw)
+        except ValueError:
+            return Response({'error': '"timestep" harus berupa angka'}, status=400)
+
+        try:
+            target_date = datetime.strptime(tanggal_str, "%d-%m-%Y")
+        except ValueError:
+            return Response({'error': 'Format "tanggalPrediksi" harus "dd-mm-yyyy".'}, status=400)
+
+        # Load model
+        MODEL_PATHS_UNIVARIAT = loadModelsUni()
+        if timestep not in MODEL_PATHS_UNIVARIAT:
+            return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
+        model = MODEL_PATHS_UNIVARIAT[timestep]
+
+        # Load data dari file lokal
+        base_dir = Path(__file__).resolve().parent  # prediksi/api
+        data_univariat = base_dir / "models" / "datasets" / "1994-2025-univariat.csv"
+        if not data_univariat.exists():
+            return Response({'error': 'Dataset tidak ditemukan.'}, status=404)
+
+        df = pd.read_csv(data_univariat)
+        df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
+        df = df[['TANGGAL', 'FF_AVG']]
+        df.set_index('TANGGAL', inplace=True)
+
+        # Ambil data input untuk prediksi
+        input_start = target_date - timedelta(days=timestep)
+        input_end = target_date - timedelta(days=1)
+        input_df = df.loc[input_start:input_end][['FF_AVG']]
+
+        if len(input_df) != timestep:
+            return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
+
+        # Scaling
+        X_scaler, y_scaler = getScalerUni()
+        input_scaled = X_scaler.transform(input_df.values)
+        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 1)
+
+        predictions = []
+        actual_values = []
+        tanggal_prediksi = []
+
+        # Loop prediksi recursive sampai 30 hari
+        for i in range(30):
+            current_date = target_date + timedelta(days=i)
+
+            # prediksi
+            result = model.predict(input_seq, verbose=0)[0]
+            prediction = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()[0]
+            predictions.append(prediction)
+            tanggal_prediksi.append(current_date.strftime("%Y-%m-%d"))
+
+            # simpan data aktual kalau masih ada di dataset
+            if current_date in df.index:
+                actual_values.append(df.loc[current_date, 'FF_AVG'])
+            else:
+                actual_values.append(None)
+
+            # update input_seq untuk prediksi berikutnya (recursive)
+            next_value = result[0]  # ambil hanya 1 langkah pertama
+            next_value = np.array(next_value).reshape(1, 1, 1)
+            input_seq = np.append(input_seq[:, 1:, :], next_value, axis=1)
+
+        # Evaluasi hanya bisa dihitung kalau actual lengkap (30 hari tersedia)
+        if None not in actual_values:
+            actual_scaled = y_scaler.transform(np.array(actual_values).reshape(-1, 1)).flatten()
+            pred_scaled = X_scaler.transform(np.array(predictions).reshape(-1, 1)).flatten()
+
+            mae = float(mean_absolute_error(actual_scaled, pred_scaled))
+            rmse = float(np.sqrt(mean_squared_error(actual_scaled, pred_scaled)))
+
+            mask = actual_scaled != 0
+            if np.any(mask):
+                mape = float(np.mean(np.abs((actual_scaled[mask] - pred_scaled[mask]) / actual_scaled[mask])) * 100)
+            else:
+                mape = None
+        else:
+            mae = rmse = mape = 'Data aktual tidak lengkap'
+
+        return Response({
+            'timestep': timestep,
+            'tanggal_prediksi': tanggal_str,
+            'tipe': 'univariat',
+            'prediction': predictions,
+            'actual': actual_values,
+            'tanggal_aktual': tanggal_prediksi,
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
 
 # input file
 @api_view(['POST'])
