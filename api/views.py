@@ -355,10 +355,9 @@ def prediksi_dari_tanggal_univariat_baru(request):
         MODEL_PATHS_UNIVARIAT = loadModelsUni()
         if timestep not in MODEL_PATHS_UNIVARIAT:
             return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
-        model = MODEL_PATHS_UNIVARIAT[timestep]
 
-        # Load data dari file lokal
-        base_dir = Path(__file__).resolve().parent  # prediksi/api
+        # Load data
+        base_dir = Path(__file__).resolve().parent
         data_univariat = base_dir / "models" / "datasets" / "1994-2025-univariat.csv"
         if not data_univariat.exists():
             return Response({'error': 'Dataset tidak ditemukan.'}, status=404)
@@ -368,55 +367,70 @@ def prediksi_dari_tanggal_univariat_baru(request):
         df = df[['TANGGAL', 'FF_AVG']]
         df.set_index('TANGGAL', inplace=True)
 
-        # Ambil data input untuk prediksi
-        input_start = target_date - timedelta(days=timestep)
-        input_end = target_date - timedelta(days=1)
-        input_df = df.loc[input_start:input_end][['FF_AVG']]
-
-        if len(input_df) != timestep:
-            return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
+        last_data_date = df.index.max()
 
         # Scaling
         X_scaler, y_scaler = getScalerUni()
+
+        # --- STEP 1: siapkan input awal (ambil dari data aktual atau prediksi sebelumnya) ---
+        input_start = last_data_date - timedelta(days=timestep-1)
+        input_df = df.loc[input_start:last_data_date][['FF_AVG']].copy()
         input_scaled = X_scaler.transform(input_df.values)
-        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 1)
+        input_seq = np.expand_dims(input_scaled, axis=0)
+        print(f"data inputan asli: {input_df.values.flatten().tolist()}")
+        print(f"data inputan scaled: {input_scaled.flatten().tolist()}")
+        # enter di print
+        print("\n====================\n")
 
-        predictions = []
-        actual_values = []
-        tanggal_prediksi = []
+        model = MODEL_PATHS_UNIVARIAT[timestep]
 
-        # Loop prediksi recursive sampai 30 hari
-        for i in range(30):
-            current_date = target_date + timedelta(days=i)
+        # --- STEP 2: prediksi recursive sampai target_date tercapai ---
+        current_date = last_data_date + timedelta(days=1)
+        predictions_dict = {}
 
-            # prediksi
+        while current_date <= target_date + timedelta(days=29):
+            # Prediksi 1 langkah ke depan
             result = model.predict(input_seq, verbose=0)[0]
-            prediction = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()[0]
-            predictions.append(prediction)
-            tanggal_prediksi.append(current_date.strftime("%Y-%m-%d"))
 
-            # simpan data aktual kalau masih ada di dataset
-            if current_date in df.index:
-                actual_values.append(df.loc[current_date, 'FF_AVG'])
-            else:
-                actual_values.append(None)
+            prediction_value = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()[0]
+            prediction_value2 = y_scaler.inverse_transform(result.reshape(-1, 1)).flatten()
+            print(f"prediction value: {prediction_value2}  \n====================\n")
 
-            # update input_seq untuk prediksi berikutnya (recursive)
-            next_value = result[0]  # ambil hanya 1 langkah pertama
-            next_value = np.array(next_value).reshape(1, 1, 1)
-            input_seq = np.append(input_seq[:, 1:, :], next_value, axis=1)
+            # Simpan hasil
+            predictions_dict[current_date] = prediction_value
+            print(f"Prediksi untuk {current_date.strftime('%Y-%m-%d')}: {prediction_value}")
 
-        # Evaluasi hanya bisa dihitung kalau actual lengkap (30 hari tersedia)
-        if None not in actual_values:
-            actual_scaled = y_scaler.transform(np.array(actual_values).reshape(-1, 1)).flatten()
-            pred_scaled = X_scaler.transform(np.array(predictions).reshape(-1, 1)).flatten()
+            # Update input_seq (geser ke depan, tambahkan prediksi baru)
+            new_scaled = X_scaler.transform([[prediction_value]])
+            print(f"data asli baru: {prediction_value} => data scaled baru: {new_scaled.flatten().tolist()}")
+            print("\n====================\n")
+            input_seq = np.roll(input_seq, -1, axis=1)  # geser window
+            input_seq[0, -1, 0] = new_scaled[0, 0]  # tambahkan prediksi
+            print(f"data inputan baru: {input_seq}")
 
-            mae = float(mean_absolute_error(actual_scaled, pred_scaled))
-            rmse = float(np.sqrt(mean_squared_error(actual_scaled, pred_scaled)))
+            # Geser tanggal
+            current_date += timedelta(days=1)
+
+        # --- STEP 3: ambil 30 hari prediksi mulai target_date ---
+        tanggal_aktual = [(target_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(30)]
+        prediction = [predictions_dict[target_date + timedelta(days=i)] for i in range(30)]
+
+        # --- STEP 4: ambil data aktual jika tersedia ---
+        actual_df = df.loc[target_date:target_date + timedelta(days=29)]['FF_AVG']
+
+        if len(actual_df) == 30:
+            actual_values = actual_df.values
+            actual_scaled = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
+
+            # Bandingkan dengan prediksi (yang sudah diskalakan ulang juga)
+            prediction_scaled = y_scaler.transform(np.array(prediction).reshape(-1, 1)).flatten()
+
+            mae = float(mean_absolute_error(actual_scaled, prediction_scaled))
+            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_scaled)))
 
             mask = actual_scaled != 0
             if np.any(mask):
-                mape = float(np.mean(np.abs((actual_scaled[mask] - pred_scaled[mask]) / actual_scaled[mask])) * 100)
+                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_scaled[mask]) / actual_scaled[mask])) * 100)
             else:
                 mape = None
         else:
@@ -426,9 +440,9 @@ def prediksi_dari_tanggal_univariat_baru(request):
             'timestep': timestep,
             'tanggal_prediksi': tanggal_str,
             'tipe': 'univariat',
-            'prediction': predictions,
-            'actual': actual_values,
-            'tanggal_aktual': tanggal_prediksi,
+            'prediction': prediction,
+            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'tanggal_aktual': tanggal_aktual,
             'mae': mae,
             'rmse': rmse,
             'mape': mape
