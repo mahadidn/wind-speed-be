@@ -10,8 +10,12 @@ import pandas as pd
 import numpy as np
 from api.utils.getScalerUni import getScalerUni
 from api.utils.getScalerMulti import getScalerMulti
+from api.utils.getScalerTavg import getScalerTavg
+from api.utils.getScalerRhavg import getScalerRhavg
 from api.utils.loadModelsUni import loadModelsUni
 from api.utils.loadModelsMulti import loadModelsMulti 
+from api.utils.loadModelsTavg import loadModelsTavg
+from api.utils.loadModelsRhavg import loadModelsRhavg
 from datetime import datetime, timedelta   
 from pathlib import Path
 
@@ -184,6 +188,11 @@ def prediksi_dari_tanggal_univariat(request):
 
         if len(input_df) != timestep:
             return Response({'error': f'Data tidak mencukupi untuk {timestep} hari sebelum {tanggal_str}.'}, status=400)
+        # lihat data input
+        print(f"Data input untuk prediksi dari {input_start.strftime('%Y-%m-%d')} sampai {input_end.strftime('%Y-%m-%d')}:")
+
+        for date, value in input_df.iterrows():
+            print(f"  {date.strftime('%Y-%m-%d')}: {value['FF_AVG']}")
 
         # Ambil data aktual (30 hari setelah tanggal prediksi)
         pred_start = target_date
@@ -196,6 +205,7 @@ def prediksi_dari_tanggal_univariat(request):
         # Scaling
         X_scaler, y_scaler = getScalerUni()
         input_scaled = X_scaler.transform(input_df.values)
+        print(f"Input scaled untuk prediksi: {input_scaled.flatten().tolist()}")
 
         # Prediksi
         input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 1)
@@ -451,6 +461,163 @@ def prediksi_dari_tanggal_univariat_baru(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+@api_view(['POST'])
+def prediksi_dari_tanggal_multivariat_baru(request):
+    try:
+        timestep_raw = request.data.get('timestep')
+        tanggal_str = request.data.get('tanggalPrediksi')
+
+        if not timestep_raw or not tanggal_str:
+            return Response({'error': 'Parameter "timestep" dan "tanggalPrediksi" wajib diisi.'}, status=400)
+
+        try:
+            timestep = int(timestep_raw)
+        except ValueError:
+            return Response({'error': '"timestep" harus berupa angka'}, status=400)
+
+        try:
+            target_date = datetime.strptime(tanggal_str, "%d-%m-%Y")
+        except ValueError:
+            return Response({'error': 'Format "tanggalPrediksi" harus "dd-mm-yyyy".'}, status=400)
+
+        # Load models
+        MODEL_PATHS_MULTIVARIAT = loadModelsMulti()      # FF_AVG
+        MODEL_PATHS_MULTIVARIAT_TAVG = loadModelsTavg()  # TAVG
+        MODEL_PATHS_MULTIVARIAT_RHAVG = loadModelsRhavg()  # RH_AVG
+
+        if timestep not in MODEL_PATHS_MULTIVARIAT:
+            return Response({'error': f'Model untuk timestep {timestep} tidak tersedia.'}, status=400)
+
+        # Load dataset
+        base_dir = Path(__file__).resolve().parent
+        data_multivariat = base_dir / "models" / "datasets" / "1994_2025_multivariat.csv"
+        if not data_multivariat.exists():
+            return Response({'error': f'Dataset tidak ditemukan, {data_multivariat}'}, status=404)
+
+        df = pd.read_csv(data_multivariat)
+        df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], format='%Y-%m-%d')
+        df = df[['TANGGAL', 'FF_AVG', 'TAVG', 'RH_AVG']]
+        df.set_index('TANGGAL', inplace=True)
+
+        last_data_date = df.index.max()
+
+        # Scalers
+        X_scaler, y_scaler = getScalerMulti()   # FF_AVG
+        y_scaler_tavg = getScalerTavg()
+        y_scaler_rhavg = getScalerRhavg()
+
+        # --- STEP 1: input awal pakai data terakhir ---
+        input_start = last_data_date - timedelta(days=timestep-1)
+        input_df = df.loc[input_start:last_data_date][['FF_AVG', 'TAVG', 'RH_AVG']].copy()
+        # liat data input
+        print(f"Data input untuk prediksi dari {input_start.strftime('%Y-%m-%d')} sampai {last_data_date.strftime('%Y-%m-%d')}:")
+        for date, row in input_df.iterrows():
+            print(f"  {date.strftime('%Y-%m-%d')}: FF_AVG={row['FF_AVG']}, TAVG={row['TAVG']}, RH_AVG={row['RH_AVG']}")
+
+        if len(input_df) != timestep:
+            return Response({'error': f'Data tidak mencukupi untuk timestep {timestep}.'}, status=400)
+
+        input_scaled = X_scaler.transform(input_df.values)
+        input_seq = np.expand_dims(input_scaled, axis=0)  # shape: (1, timestep, 3)
+        # liat data input scaled
+        print(f"Data input scaled: {input_scaled.tolist()}")
+        print("\n====================\n")
+
+        # Load model sesuai timestep
+        model_ffavg = MODEL_PATHS_MULTIVARIAT[timestep]
+        model_tavg = MODEL_PATHS_MULTIVARIAT_TAVG[timestep]
+        model_rhavg = MODEL_PATHS_MULTIVARIAT_RHAVG[timestep]
+
+        # --- STEP 2: recursive prediction sampai target_date + 30 ---
+        current_date = last_data_date + timedelta(days=1)
+        predictions_ff = {}
+        predictions_tavg = {}
+        predictions_rhavg = {}
+
+        while current_date <= target_date + timedelta(days=29):
+            # Prediksi FF_AVG
+            result_ff = model_ffavg.predict(input_seq, verbose=0)[0]
+            pred_ff = y_scaler.inverse_transform(result_ff.reshape(-1, 1)).flatten()[0]
+            pred_ff2 = y_scaler.inverse_transform(result_ff.reshape(-1, 1)).flatten()
+            print(f"Prediksi untuk {current_date.strftime('%Y-%m-%d')}: FF_AVG={pred_ff2}")
+            print("\n====================\n")
+
+
+            # Prediksi TAVG
+            result_tavg = model_tavg.predict(input_seq, verbose=0)[0]
+            pred_tavg = y_scaler_tavg.inverse_transform(result_tavg.reshape(-1, 1)).flatten()[0]
+            pred_tavg2 = y_scaler_tavg.inverse_transform(result_tavg.reshape(-1, 1)).flatten()
+            print(f"Prediksi untuk {current_date.strftime('%Y-%m-%d')}: TAVG={pred_tavg2}")
+            print("\n====================\n")
+
+            # Prediksi RH_AVG
+            result_rh = model_rhavg.predict(input_seq, verbose=0)[0]
+            pred_rh = y_scaler_rhavg.inverse_transform(result_rh.reshape(-1, 1)).flatten()[0]
+            pred_rh2 = y_scaler_rhavg.inverse_transform(result_rh.reshape(-1, 1)).flatten()
+            print(f"Prediksi untuk {current_date.strftime('%Y-%m-%d')}: RH_AVG={pred_rh2}")
+            print("\n====================\n")
+
+            # Simpan hasil
+            predictions_ff[current_date] = pred_ff
+            predictions_tavg[current_date] = pred_tavg
+            predictions_rhavg[current_date] = pred_rh
+            print(f"Prediksi disimpan untuk {current_date.strftime('%Y-%m-%d')}: FF_AVG={pred_ff}, TAVG={pred_tavg}, RH_AVG={pred_rh}")
+            print("\n====================\n")
+
+            # Buat input baru dari prediksi
+            new_input = np.array([[pred_ff, pred_tavg, pred_rh]])  # shape (1,3)
+            new_scaled = X_scaler.transform(new_input)
+            print(f"Data asli baru: FF_AVG={pred_ff}, TAVG={pred_tavg}, RH_AVG={pred_rh} => Data scaled baru: {new_scaled.flatten().tolist()}")
+            print("\n====================\n")
+
+            # Geser window
+            input_seq = np.roll(input_seq, -1, axis=1)
+            input_seq[0, -1, :] = new_scaled[0]
+            print(f"Data inputan baru: {input_seq}")
+            print("\n====================\n")
+
+            # Geser tanggal
+            current_date += timedelta(days=1)
+
+        # --- STEP 3: ambil 30 hari prediksi mulai target_date ---
+        tanggal_prediksi = [(target_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(30)]
+        prediction_ff = [predictions_ff[target_date + timedelta(days=i)] for i in range(30)]
+        # prediction_tavg = [predictions_tavg[target_date + timedelta(days=i)] for i in range(30)]
+        # prediction_rh = [predictions_rhavg[target_date + timedelta(days=i)] for i in range(30)]
+
+        # --- STEP 4: ambil data aktual jika tersedia ---
+        actual_ff = df.loc[target_date:target_date + timedelta(days=29)]['FF_AVG']
+
+        if len(actual_ff) == 30:
+            actual_values = actual_ff.values
+            actual_scaled = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
+            prediction_scaled = y_scaler.transform(np.array(prediction_ff).reshape(-1, 1)).flatten()
+
+            mae = float(mean_absolute_error(actual_scaled, prediction_scaled))
+            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_scaled)))
+
+            mask = actual_scaled != 0
+            if np.any(mask):
+                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_scaled[mask]) / actual_scaled[mask])) * 100)
+            else:
+                mape = None
+        else:
+            mae = rmse = mape = 'Data aktual tidak lengkap'
+
+        return Response({
+            'timestep': timestep,
+            'tanggal_prediksi': tanggal_str,
+            'tipe': 'multivariat',
+            'prediction': prediction_ff,
+            'actual': actual_ff.tolist() if len(actual_ff) == 30 else 'Data aktual tidak lengkap',
+            'tanggal_aktual': tanggal_prediksi,
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape
+        })
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 
 # input file
 @api_view(['POST'])
