@@ -219,13 +219,15 @@ def prediksi_dari_tanggal_univariat(request):
             actual_values = actual_df.values
             actual_values = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
 
-            mae = float(mean_absolute_error(actual_values, prediction_normalized))
-            rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_normalized)))
+            prediction_data_scaled = prediction_normalized[0: len(actual_df - 1)]
+
+            mae = float(mean_absolute_error(actual_values, prediction_data_scaled))
+            rmse = float(np.sqrt(mean_squared_error(actual_values, prediction_data_scaled)))
 
             # Tangani kemungkinan nilai nol pada actual
             mask = actual_values != 0
             if np.any(mask):
-                mape = float(np.mean(np.abs((actual_values[mask] - prediction_normalized[mask]) / actual_values[mask])) * 100)
+                mape = float(np.mean(np.abs((actual_values[mask] - prediction_data_scaled[mask]) / actual_values[mask])) * 100)
             else:
                 mape = None  # atau: mape = 'MAPE tidak bisa dihitung karena semua nilai aktual = 0'
         else:
@@ -236,7 +238,7 @@ def prediksi_dari_tanggal_univariat(request):
             'tanggal_prediksi': tanggal_str,
             'tipe': 'univariat',
             'prediction': prediction.tolist(),
-            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'actual': actual_df.tolist() if len(actual_df) > 0 else 'Data aktual tidak lengkap',
             'tanggal_aktual': tanggal_aktual,
             'mae': mae,
             'rmse': rmse,
@@ -330,7 +332,7 @@ def prediksi_dari_tanggal_multivariat(request):
             'tanggal_prediksi': tanggal_str,
             'tipe': 'multivariat',
             'prediction': prediction.tolist(),
-            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'actual': actual_df.tolist() if len(actual_df) > 0 else 'Data aktual tidak lengkap',
             'tanggal_aktual': tanggal_aktual,
             'mae': mae,
             'rmse': rmse,
@@ -435,12 +437,14 @@ def prediksi_dari_tanggal_univariat_baru(request):
             # Bandingkan dengan prediksi (yang sudah diskalakan ulang juga)
             prediction_scaled = y_scaler.transform(np.array(prediction).reshape(-1, 1)).flatten()
 
-            mae = float(mean_absolute_error(actual_scaled, prediction_scaled))
-            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_scaled)))
+            prediction_data_sclaed = prediction_scaled[0: len(actual_df - 1)]
+
+            mae = float(mean_absolute_error(actual_scaled, prediction_data_sclaed))
+            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_data_sclaed)))
 
             mask = actual_scaled != 0
             if np.any(mask):
-                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_scaled[mask]) / actual_scaled[mask])) * 100)
+                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_data_sclaed[mask]) / actual_scaled[mask])) * 100)
             else:
                 mape = None
         else:
@@ -451,7 +455,7 @@ def prediksi_dari_tanggal_univariat_baru(request):
             'tanggal_prediksi': tanggal_str,
             'tipe': 'univariat',
             'prediction': prediction,
-            'actual': actual_df.tolist() if len(actual_df) == 30 else 'Data aktual tidak lengkap',
+            'actual': actual_df.tolist() if len(actual_df) > 0 else 'Data aktual tidak lengkap',
             'tanggal_aktual': tanggal_aktual,
             'mae': mae,
             'rmse': rmse,
@@ -588,17 +592,19 @@ def prediksi_dari_tanggal_multivariat_baru(request):
         # --- STEP 4: ambil data aktual jika tersedia ---
         actual_ff = df.loc[target_date:target_date + timedelta(days=29)]['FF_AVG']
 
-        if len(actual_ff) == 30:
+        if len(actual_ff) > 0:
             actual_values = actual_ff.values
             actual_scaled = y_scaler.transform(actual_values.reshape(-1, 1)).flatten()
             prediction_scaled = y_scaler.transform(np.array(prediction_ff).reshape(-1, 1)).flatten()
 
-            mae = float(mean_absolute_error(actual_scaled, prediction_scaled))
-            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_scaled)))
+            prediction_data_scaled = prediction_scaled[0: len(actual_ff - 1)]
+
+            mae = float(mean_absolute_error(actual_scaled, prediction_data_scaled))
+            rmse = float(np.sqrt(mean_squared_error(actual_scaled, prediction_data_scaled)))
 
             mask = actual_scaled != 0
             if np.any(mask):
-                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_scaled[mask]) / actual_scaled[mask])) * 100)
+                mape = float(np.mean(np.abs((actual_scaled[mask] - prediction_data_scaled[mask]) / actual_scaled[mask])) * 100)
             else:
                 mape = None
         else:
@@ -609,7 +615,7 @@ def prediksi_dari_tanggal_multivariat_baru(request):
             'tanggal_prediksi': tanggal_str,
             'tipe': 'multivariat',
             'prediction': prediction_ff,
-            'actual': actual_ff.tolist() if len(actual_ff) == 30 else 'Data aktual tidak lengkap',
+            'actual': actual_ff.tolist() if len(actual_ff) > 0 else 'Data aktual tidak lengkap',
             'tanggal_aktual': tanggal_prediksi,
             'mae': mae,
             'rmse': rmse,
